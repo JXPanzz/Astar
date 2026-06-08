@@ -1,2 +1,6 @@
 build/
 astar_demo
+
+# macOS Finder 文件夹元数据
+.DS_Store
+**/.DS_Store
