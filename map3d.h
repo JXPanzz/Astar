@@ -3,7 +3,7 @@
 #include "types.h"
 #include <vector>
 #include <random>
-#include <cstdint>
+#include <stdint.h>
 
 class Map3D {
 public:

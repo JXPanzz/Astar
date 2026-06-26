@@ -1,8 +1,10 @@
 #pragma once
 
-#include <cstdint>
+#include <stdint.h>
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 #include <vector>
 #include <functional>
 

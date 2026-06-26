@@ -46,6 +46,8 @@ void printUsage(const char* prog) {
               << "  Home         Jump to start position\n"
               << "  0            Cycle through layers\n"
               << "  Space        Skip path animation\n"
+              << "  Mouse click  Set new intermediate goal & re-search\n"
+              << "  r            Reset path to original search result\n"
               << "  q            Quit\n"
               << std::endl;
 }
@@ -150,7 +152,8 @@ int main(int argc, char** argv) {
     std::cout << "Search Results:\n";
     std::cout << "  Success:       " << (result.success ? "YES" : "PARTIAL/FAILED") << "\n";
     std::cout << "  Nodes explored: " << result.nodes_explored << "\n";
-    std::cout << "  Path length:   " << result.path.size() << " cells\n";
+    std::cout << "  Nodes visited:  " << result.nodes_visited << "\n";
+    std::cout << "  Path length:    " << result.path.size() << " cells\n";
     std::cout << "  Total cost:    " << std::fixed << std::setprecision(1) << result.total_cost << "\n";
     std::cout << "  Time:          " << std::fixed << std::setprecision(2) << result.time_ms << " ms\n";
     std::cout << "  Segments:      " << result.segments.size() << "\n";

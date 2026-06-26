@@ -21,6 +21,7 @@ SearchResult AStar::search(const Map3D& map, ProgressCallback progress_cb) {
 
     Pos3D current_pos = start;
     int total_explored = 0;
+    int total_visited = 0;
 
     for (int g = 0; g < goals_remaining; ++g) {
         // Find the nearest unvisited goal
@@ -29,14 +30,16 @@ SearchResult AStar::search(const Map3D& map, ProgressCallback progress_cb) {
 
         std::vector<Pos3D> segment;
         int segment_explored = 0;
+        int segment_visited = 0;
 
         bool found = searchSingle(
             map, current_pos, all_goals[nearest_idx],
-            segment, segment_explored,
+            segment, segment_explored, segment_visited,
             progress_cb, g, goals_remaining
         );
 
         total_explored += segment_explored;
+        total_visited += segment_visited;
 
         if (!found) {
             std::cerr << "  Warning: Could not find path to goal " << nearest_idx
@@ -66,19 +69,17 @@ SearchResult AStar::search(const Map3D& map, ProgressCallback progress_cb) {
     }
 
     result.nodes_explored = total_explored;
-    result.success = (goals_remaining == 0) ||
-                     (visited_goals.size() > 0 &&
-                      std::all_of(visited_goals.begin(),
-                                  visited_goals.begin() + goals_remaining,
-                                  [](bool v) { return v; }));
+    result.nodes_visited = total_visited;
+    // Success if we found at least one path segment (partial success is still useful)
+    result.success = !result.segments.empty();
+
+    // If visit_all_goals mode, also verify all goals were reached
+    if (result.success && config_.visit_all_goals) {
+        result.success = (result.segments.size() == all_goals.size());
+    }
 
     auto end_time = std::chrono::high_resolution_clock::now();
     result.time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-
-    // If partial success, adjust
-    if (!result.success) {
-        result.nodes_explored = total_explored;
-    }
 
     return result;
 }
@@ -89,6 +90,7 @@ bool AStar::searchSingle(
     const Pos3D& segment_goal,
     std::vector<Pos3D>& path_out,
     int& nodes_explored,
+    int& nodes_visited,
     ProgressCallback progress_cb,
     int segment_idx,
     int total_segments) {
@@ -114,6 +116,7 @@ bool AStar::searchSingle(
     if (segment_start == segment_goal) {
         path_out.push_back(segment_start);
         nodes_explored = 0;
+        nodes_visited = 0;
         return true;
     }
 
@@ -123,6 +126,7 @@ bool AStar::searchSingle(
     open_set.push({segment_start, 0.0f, h_start, 0});
 
     int explored = 0;
+    int visited = 1;  // start node added to open set
     SearchProgress progress;
     progress.segment_index = segment_idx;
     progress.total_segments = total_segments;
@@ -144,6 +148,7 @@ bool AStar::searchSingle(
         // Goal check
         if (current.pos == segment_goal) {
             nodes_explored = explored;
+            nodes_visited = visited;
             path_out = reconstructPath(start_key, goal_key, came_from);
             return true;
         }
@@ -175,12 +180,20 @@ bool AStar::searchSingle(
 
                 float h = npos.manhattanTo(segment_goal, layer_penalty);
                 open_set.push({npos, tentative_g, h, current_key});
+                ++visited;
             }
         }
     }
 
     nodes_explored = explored;
+    nodes_visited = visited;
     return false; // No path found
+}
+
+bool AStar::searchPath(const Map3D& map, const Pos3D& from, const Pos3D& to,
+                       std::vector<Pos3D>& path_out) {
+    int explored = 0, visited = 0;
+    return searchSingle(map, from, to, path_out, explored, visited, nullptr, 0, 1);
 }
 
 int AStar::findNearestGoal(const Pos3D& from, const std::vector<Pos3D>& goals,
