@@ -69,7 +69,8 @@ private:
                           Pos3D& current_position,
                           float& cumulative_cost,
                           int vp_x, int vp_y, int current_layer,
-                          std::string& status_msg);
+                          std::string& status_msg,
+                          int& status_timer);
 
     // ---- Frame buffer rendering (flicker reduction) ----
     void renderFrame();

@@ -177,13 +177,15 @@ int main(int argc, char** argv) {
         if (c != 'q' && c != 'Q') {
             viz.init();
             viz.animatePath(map, result);
+            viz.cleanup();  // restore terminal to normal mode before next prompt
 
             std::cout << "\nPress ENTER to explore, or 'q' to quit...\n";
-            c = std::cin.get();
+            c = std::cin.get();  // safe: terminal is back in canonical/blocking mode
             if (c != 'q' && c != 'Q') {
+                viz.init();  // re-init raw mode for explore
                 viz.explore(map, result);
+                viz.cleanup();
             }
-            viz.cleanup();
         }
     } else if (!text_mode) {
         std::cout << "No valid path to visualize.\n";

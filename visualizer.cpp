@@ -40,7 +40,9 @@ void Visualizer::cleanup() {
         disableMouse();
         resetColor();
         showCursor();
-        clearScreen();
+        // Move cursor below the rendered area before restoring terminal,
+        // so the shell prompt appears below our frame instead of overwriting it.
+        std::cout << "\033[" << (term_rows_ + 1) << ";1H" << std::flush;
         tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios_);
         // Restore blocking mode
         int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -185,11 +187,13 @@ void Visualizer::handleMouseClick(const InputEvent& event,
                                    Pos3D& current_position,
                                    float& cumulative_cost,
                                    int vp_x, int vp_y, int current_layer,
-                                   std::string& status_msg) {
+                                   std::string& status_msg,
+                                   int& status_timer) {
     Pos3D clicked;
     if (!screenToMap(event.mouse_x, event.mouse_y,
                      vp_x, vp_y, current_layer, map, clicked)) {
         status_msg = "  Click outside map area";
+        status_timer = 60;
         return;
     }
 
@@ -199,18 +203,21 @@ void Visualizer::handleMouseClick(const InputEvent& event,
         oss << "  Cannot traverse (" << clicked.x << "," << clicked.y
             << "," << clicked.z << ") — obstacle or danger zone";
         status_msg = oss.str();
+        status_timer = 60;
         return;
     }
 
     // Don't search to current position
     if (clicked == current_position) {
         status_msg = "  Already at this position";
+        status_timer = 30;
         return;
     }
 
     // Run A* search for the new segment
     status_msg = "  Searching to (" + std::to_string(clicked.x) + ","
                + std::to_string(clicked.y) + "," + std::to_string(clicked.z) + ")...";
+    status_timer = 999;  // persists until replaced by success/failure message
 
     // Flush the status message now so the user sees it during search
     renderFrame();
@@ -227,6 +234,7 @@ void Visualizer::handleMouseClick(const InputEvent& event,
         oss << "  No path to (" << clicked.x << "," << clicked.y
             << "," << clicked.z << ")";
         status_msg = oss.str();
+        status_timer = 60;
         return;
     }
 
@@ -254,6 +262,7 @@ void Visualizer::handleMouseClick(const InputEvent& event,
         << clicked.x << "," << clicked.y << "," << clicked.z
         << ")  |  Total: " << current_path.size() << " cells";
     status_msg = oss.str();
+    status_timer = 60;  // show for ~2 seconds
 }
 
 // ============================================================
@@ -640,6 +649,7 @@ void Visualizer::explore(const Map3D& map, const SearchResult& result) {
     int vp_cy = result.path.empty() ? map.height() / 2 : result.path[0].y;
 
     std::string status_msg;
+    int status_timer = 0;  // frames remaining to show the current status
     bool running = true;
 
     while (running) {
@@ -666,72 +676,73 @@ void Visualizer::explore(const Map3D& map, const SearchResult& result) {
         // Help bar
         frameWrite(26, 2, "[1-9]Layer [Arrows/WASD/HJKL]Pan [Home]Start [0]Cycle [Click]SetGoal [r]Reset [q]Quit");
 
-        // Status message
-        renderStatus(status_msg);
-        // Clear status after showing it (it will reappear if handleMouseClick sets it again)
+        // Status message (persists for ~1s / 30 frames)
         if (!status_msg.empty()) {
-            // Keep it for one more frame, then clear
+            renderStatus(status_msg);
+            if (--status_timer <= 0) {
+                status_msg.clear();
+            }
+        } else {
+            renderStatus("");
         }
 
         // Render everything
         renderFrame();
 
-        // Clear status for next frame (unless re-set by a new click)
-        status_msg.clear();
-
-        // Poll for input
-        usleep(30000); // 30ms
-        InputEvent event = readInput();
-
-        if (event.type == InputType::KEY) {
-            switch (event.key) {
-                case 'q': case 'Q':
-                    running = false;
-                    break;
-                case '1': case '2': case '3': case '4': case '5':
-                case '6': case '7': case '8': case '9':
-                    if (event.key - '1' < map.depth())
-                        current_layer = event.key - '1';
-                    break;
-                case '0':
-                    current_layer = (current_layer + 1) % map.depth();
-                    break;
-                case 'w': case 'k': case KEY_UP:
-                    vp_cy = std::max(10, vp_cy - 3);
-                    break;
-                case 's': case 'j': case KEY_DOWN:
-                    vp_cy = std::min(map.height() - 11, vp_cy + 3);
-                    break;
-                case 'a': case 'h': case KEY_LEFT:
-                    vp_cx = std::max(35, vp_cx - 5);
-                    break;
-                case 'd': case 'l': case KEY_RIGHT:
-                    vp_cx = std::min(map.width() - 36, vp_cx + 5);
-                    break;
-                case KEY_HOME:
-                    vp_cx = map.getStart().x;
-                    vp_cy = map.getStart().y;
-                    current_layer = map.getStart().z;
-                    break;
-                case 'r': case 'R':
-                    // Reset path to original search result
-                    current_path = original_path;
-                    current_path_set = original_path_set;
-                    current_position = original_position;
-                    cumulative_cost = original_cost;
-                    status_msg = "  Path reset to original search result";
-                    break;
-                default:
-                    break;
+        // Poll for input — drain all pending events
+        usleep(20000); // 20ms
+        InputEvent event;
+        while ((event = readInput()).type != InputType::NONE) {
+            if (event.type == InputType::KEY) {
+                switch (event.key) {
+                    case 'q': case 'Q':
+                        running = false;
+                        break;
+                    case '1': case '2': case '3': case '4': case '5':
+                    case '6': case '7': case '8': case '9':
+                        if (event.key - '1' < map.depth())
+                            current_layer = event.key - '1';
+                        break;
+                    case '0':
+                        current_layer = (current_layer + 1) % map.depth();
+                        break;
+                    case 'w': case 'k': case KEY_UP:
+                        vp_cy = std::max(10, vp_cy - 3);
+                        break;
+                    case 's': case 'j': case KEY_DOWN:
+                        vp_cy = std::min(map.height() - 11, vp_cy + 3);
+                        break;
+                    case 'a': case 'h': case KEY_LEFT:
+                        vp_cx = std::max(35, vp_cx - 5);
+                        break;
+                    case 'd': case 'l': case KEY_RIGHT:
+                        vp_cx = std::min(map.width() - 36, vp_cx + 5);
+                        break;
+                    case KEY_HOME:
+                        vp_cx = map.getStart().x;
+                        vp_cy = map.getStart().y;
+                        current_layer = map.getStart().z;
+                        break;
+                    case 'r': case 'R':
+                        current_path = original_path;
+                        current_path_set = original_path_set;
+                        current_position = original_position;
+                        cumulative_cost = original_cost;
+                        status_msg = "  Path reset to original search result";
+                        status_timer = 30;
+                        break;
+                    default:
+                        break;
+                }
+            } else if (event.type == InputType::MOUSE_CLICK) {
+                int vp_x = std::max(0, vp_cx - 35);
+                int vp_y = std::max(0, vp_cy - 10);
+                handleMouseClick(event, map,
+                                 current_path, current_path_set,
+                                 current_position, cumulative_cost,
+                                 vp_x, vp_y,
+                                 current_layer, status_msg, status_timer);
             }
-        } else if (event.type == InputType::MOUSE_CLICK) {
-            int vp_x = std::max(0, vp_cx - 35);
-            int vp_y = std::max(0, vp_cy - 10);
-            handleMouseClick(event, map,
-                             current_path, current_path_set,
-                             current_position, cumulative_cost,
-                             vp_x, vp_y,
-                             current_layer, status_msg);
         }
     }
 }
